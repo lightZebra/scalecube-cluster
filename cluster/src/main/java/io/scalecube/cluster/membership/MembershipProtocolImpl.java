@@ -10,6 +10,7 @@ import io.scalecube.cluster.fdetector.FailureDetectorEvent;
 import io.scalecube.cluster.gossip.GossipProtocol;
 import io.scalecube.transport.Address;
 import io.scalecube.transport.Message;
+import io.scalecube.transport.MessageCodec;
 import io.scalecube.transport.Transport;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -205,7 +206,7 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
               .publishOn(scheduler)
               .subscribe(
                   message -> {
-                    SyncData syncData = message.data();
+                    SyncData syncData = MessageCodec.deserializeData(message.data(), SyncData.class);
                     String syncGroup = syncData.getSyncGroup();
                     Collection<MembershipRecord> membership = syncData.getMembership();
                     LOGGER.info("Joined cluster '{}': {}", syncGroup, membership);

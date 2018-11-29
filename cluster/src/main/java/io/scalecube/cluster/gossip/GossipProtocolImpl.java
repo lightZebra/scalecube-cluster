@@ -2,8 +2,10 @@ package io.scalecube.cluster.gossip;
 
 import io.scalecube.cluster.ClusterMath;
 import io.scalecube.cluster.Member;
+import io.scalecube.cluster.fdetector.PingData;
 import io.scalecube.cluster.membership.MembershipEvent;
 import io.scalecube.transport.Message;
+import io.scalecube.transport.MessageCodec;
 import io.scalecube.transport.Transport;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -169,7 +171,7 @@ public final class GossipProtocolImpl implements GossipProtocol {
   }
 
   private void onGossipReq(Message message) {
-    GossipRequest gossipRequest = message.data();
+    GossipRequest gossipRequest = MessageCodec.deserializeData(message.data(), GossipRequest.class);
     for (Gossip gossip : gossipRequest.gossips()) {
       GossipState gossipState = gossips.get(gossip.gossipId());
       if (gossipState == null) { // new gossip

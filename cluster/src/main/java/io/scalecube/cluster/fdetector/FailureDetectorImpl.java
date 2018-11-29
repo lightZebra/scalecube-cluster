@@ -4,6 +4,7 @@ import io.scalecube.cluster.Member;
 import io.scalecube.cluster.membership.MemberStatus;
 import io.scalecube.cluster.membership.MembershipEvent;
 import io.scalecube.transport.Message;
+import io.scalecube.transport.MessageCodec;
 import io.scalecube.transport.Transport;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -257,7 +258,7 @@ public final class FailureDetectorImpl implements FailureDetector {
   /** Listens to PING message and answers with ACK. */
   private void onPing(Message message) {
     LOGGER.trace("Received Ping: {}", message);
-    PingData data = message.data();
+    PingData data = MessageCodec.deserializeData(message.data(), PingData.class);
     Member localMember = memberSupplier.get();
     if (!data.getTo().id().equals(localMember.id())) {
       LOGGER.warn("Received Ping to {}, but local member is {}", data.getTo(), localMember);
@@ -287,7 +288,7 @@ public final class FailureDetectorImpl implements FailureDetector {
   /** Listens to PING_REQ message and sends PING to requested cluster member. */
   private void onPingReq(Message message) {
     LOGGER.trace("Received PingReq: {}", message);
-    PingData data = message.data();
+    PingData data = MessageCodec.deserializeData(message.data(), PingData.class);
     Member target = data.getTo();
     Member originalIssuer = data.getFrom();
     String correlationId = message.correlationId();
@@ -319,7 +320,7 @@ public final class FailureDetectorImpl implements FailureDetector {
    */
   private void onTransitPingAck(Message message) {
     LOGGER.trace("Received transit PingAck: {}", message);
-    PingData data = message.data();
+    PingData data = MessageCodec.deserializeData(message.data(), PingData.class);
     Member target = data.getOriginalIssuer();
     String correlationId = message.correlationId();
     PingData originalAckData = new PingData(target, data.getTo());
@@ -413,12 +414,12 @@ public final class FailureDetectorImpl implements FailureDetector {
 
   private boolean isPingAck(Message message) {
     return PING_ACK.equals(message.qualifier())
-        && message.<PingData>data().getOriginalIssuer() == null;
+        && MessageCodec.deserializeData(message.data(), PingData.class).getOriginalIssuer() == null;
   }
 
   private boolean isTransitPingAck(Message message) {
     return PING_ACK.equals(message.qualifier())
-        && message.<PingData>data().getOriginalIssuer() != null;
+        && MessageCodec.deserializeData(message.data(), PingData.class).getOriginalIssuer() != null;
   }
 
   /**

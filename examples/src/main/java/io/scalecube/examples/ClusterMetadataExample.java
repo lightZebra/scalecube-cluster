@@ -2,7 +2,9 @@ package io.scalecube.examples;
 
 import io.scalecube.cluster.Cluster;
 import io.scalecube.cluster.Member;
+import io.scalecube.cluster.gossip.GossipRequest;
 import io.scalecube.transport.Message;
+import io.scalecube.transport.MessageCodec;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Optional;
@@ -28,7 +30,7 @@ public class ClusterMetadataExample {
     Cluster joe = Cluster.joinAwait(metadata, alice.address());
 
     // Subscribe Joe to listen for incoming messages and print them to system out
-    joe.listen().map(Message::data).subscribe(System.out::println);
+    joe.listen().map(msg -> MessageCodec.deserializeData(msg.data(), Object.class)).subscribe(System.out::println);
 
     // Scan the list of members in the cluster and find Joe there
     Optional<Member> joeMemberOptional =
