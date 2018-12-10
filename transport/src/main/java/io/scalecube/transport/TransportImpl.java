@@ -190,7 +190,11 @@ final class TransportImpl implements Transport {
 
   private Message toMessage(ByteBuf byteBuf) {
     try (ByteBufInputStream stream = new ByteBufInputStream(byteBuf, true)) {
-      return MessageCodec.deserialize(stream);
+      int available = stream.available();
+      int readBytes = stream.readBytes();
+      Message message = MessageCodec.deserialize(stream);
+      LOGGER.info("receive: available:{}, readBytes:{}, {}", available, readBytes, message);
+      return message;
     } catch (Exception e) {
       throw new DecoderException(e);
     }
@@ -221,6 +225,7 @@ final class TransportImpl implements Transport {
     ByteBufOutputStream stream = new ByteBufOutputStream(bb);
     try {
       MessageCodec.serialize(message, stream);
+      LOGGER.info("send: writtenBytes:{}, {}", stream.writtenBytes(), message);
     } catch (Exception e) {
       bb.release();
       throw new EncoderException(e);
@@ -294,6 +299,7 @@ final class TransportImpl implements Transport {
         .option(ChannelOption.SO_KEEPALIVE, true)
         .option(ChannelOption.SO_REUSEADDR, true)
         .addressSupplier(() -> new InetSocketAddress(config.getPort()))
+        // .wiretap(true)
         .bootstrap(b -> BootstrapHandlers.updateConfiguration(b, "inbound", inboundPipeline));
   }
 
@@ -312,17 +318,18 @@ final class TransportImpl implements Transport {
         .option(ChannelOption.SO_KEEPALIVE, true)
         .option(ChannelOption.SO_REUSEADDR, true)
         .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, config.getConnectTimeout())
+        // .wiretap(true)
         .bootstrap(b -> BootstrapHandlers.updateConfiguration(b, "outbound", outboundPipeline));
   }
 
   private final class InboundChannelInitializer implements BiConsumer<ConnectionObserver, Channel> {
 
-    private static final int MAX_FRAME_LENGTH = 1024 * 1024;
+    private static final int MAX_FRAME_LENGTH = 32 * 1024;
 
     @Override
     public void accept(ConnectionObserver connectionObserver, Channel channel) {
       ChannelPipeline pipeline = channel.pipeline();
-      pipeline.addLast(new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
+      pipeline.addLast(new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 2, 0, 2));
       pipeline.addLast(exceptionHandler);
     }
   }
@@ -333,7 +340,7 @@ final class TransportImpl implements Transport {
     @Override
     public void accept(ConnectionObserver connectionObserver, Channel channel) {
       ChannelPipeline pipeline = channel.pipeline();
-      pipeline.addLast(new LengthFieldPrepender(4));
+      pipeline.addLast(new LengthFieldPrepender(2));
       pipeline.addLast(exceptionHandler);
     }
   }
