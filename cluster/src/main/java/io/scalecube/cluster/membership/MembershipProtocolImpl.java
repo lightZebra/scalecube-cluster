@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -295,6 +296,16 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
         .stream()
         .filter(member -> member.address().equals(address))
         .findFirst();
+  }
+
+  @Override
+  public Integer incarnation() {
+    return membershipTable.get(localMember.id()).incarnation();
+  }
+
+  @Override
+  public Set<String> suspectedMembers(){
+    return suspicionTimeoutTasks.keySet();
   }
 
   private void doSync() {

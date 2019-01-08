@@ -2,6 +2,7 @@ package io.scalecube.cluster;
 
 import io.scalecube.cluster.fdetector.FailureDetectorImpl;
 import io.scalecube.cluster.gossip.GossipProtocolImpl;
+import io.scalecube.cluster.jmx.ClusterData;
 import io.scalecube.cluster.membership.IdGenerator;
 import io.scalecube.cluster.membership.MembershipEvent;
 import io.scalecube.cluster.membership.MembershipProtocolImpl;
@@ -136,6 +137,7 @@ final class ClusterImpl implements Cluster {
               gossip.start();
               metadataStore.start();
 
+              new ClusterData(this);
               return membership.start();
             })
         .thenReturn(this);
@@ -342,5 +344,15 @@ final class ClusterImpl implements Cluster {
   @Override
   public boolean isShutdown() {
     return onShutdown.isDisposed();
+  }
+
+  @Override
+  public Integer incarnation() {
+    return this.membership.incarnation();
+  }
+
+  @Override
+  public Set<String> suspectedMembers() {
+    return membership.suspectedMembers();
   }
 }

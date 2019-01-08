@@ -4,6 +4,7 @@ import io.scalecube.cluster.Member;
 import io.scalecube.transport.Address;
 import java.util.Collection;
 import java.util.Optional;
+import java.util.Set;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -62,4 +63,18 @@ public interface MembershipProtocol {
    * @return member by address
    */
   Optional<Member> member(Address address);
+
+  /**
+   * Returns current incarnation of the local member.
+   *
+   * @return current incarnation of the local member
+   */
+  Integer incarnation();
+
+  /**
+   * Returns list of members that aer considered suspected at the moment.
+   *
+   * @return list of members that aer considered suspected at the moment
+   */
+  Set<String> suspectedMembers();
 }

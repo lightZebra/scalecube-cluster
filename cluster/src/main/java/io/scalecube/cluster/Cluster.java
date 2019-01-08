@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import reactor.core.Exceptions;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -269,4 +270,18 @@ public interface Cluster {
    * @return network emulator object
    */
   NetworkEmulator networkEmulator();
+
+  /**
+   * Returns current incarnation of the local member.
+   *
+   * @return current incarnation of the local member
+   */
+  Integer incarnation();
+
+  /**
+   * Returns list of members that aer considered suspected at the moment.
+   *
+   * @return list of members that aer considered suspected at the moment
+   */
+  Set<String> suspectedMembers();
 }
