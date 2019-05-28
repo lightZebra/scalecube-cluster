@@ -146,10 +146,10 @@ final class ClusterImpl implements Cluster {
                           membershipSink::next,
                           th -> LOGGER.error("Received unexpected error: ", th)));
 
-              failureDetector.start();
-              gossip.start();
-              metadataStore.start();
-              return membership.start().then(Mono.fromCallable(() -> JmxMonitorMBean.start(this)));
+              return Mono.fromRunnable(failureDetector::start)
+                  .then(Mono.fromRunnable(gossip::start))
+                  .then(Mono.fromRunnable(metadataStore::start))
+                  .then(Mono.fromCallable(() -> JmxMonitorMBean.start(this)));
             })
         .thenReturn(this);
   }
