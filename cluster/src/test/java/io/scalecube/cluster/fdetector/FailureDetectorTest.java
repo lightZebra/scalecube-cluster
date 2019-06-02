@@ -157,7 +157,7 @@ public class FailureDetectorTest extends BaseTest {
     // Create failure detectors
     FailureDetectorImpl fdA = createFd(a, members);
     FailureDetectorConfig fdBConfig =
-        ClusterConfig.builder().pingTimeout(500).pingInterval(1000).build();
+      ClusterConfig.builder().pingTimeout(500).pingInterval(1000).build();
     FailureDetectorImpl fdB = createFd(b, members, fdBConfig);
     FailureDetectorImpl fdC = createFd(c, members, ClusterConfig.defaultConfig());
     List<FailureDetectorImpl> fdetectors = Arrays.asList(fdA, fdB, fdC);
@@ -205,12 +205,12 @@ public class FailureDetectorTest extends BaseTest {
       start(fdetectors);
 
       assertStatus(
-          a.address(),
-          SUSPECT,
-          awaitEvents(listA),
-          b.address(),
-          c.address(),
-          d.address()); // node A
+        a.address(),
+        SUSPECT,
+        awaitEvents(listA),
+        b.address(),
+        c.address(),
+        d.address()); // node A
       // partitioned
       assertStatus(b.address(), SUSPECT, awaitEvents(listB), a.address());
       assertStatus(c.address(), SUSPECT, awaitEvents(listC), a.address());
@@ -269,12 +269,12 @@ public class FailureDetectorTest extends BaseTest {
       assertStatus(b.address(), SUSPECT, awaitEvents(listB), d.address());
       assertStatus(c.address(), SUSPECT, awaitEvents(listC), d.address());
       assertStatus(
-          d.address(),
-          SUSPECT,
-          awaitEvents(listD),
-          a.address(),
-          b.address(),
-          c.address()); // node D
+        d.address(),
+        SUSPECT,
+        awaitEvents(listD),
+        a.address(),
+        b.address(),
+        c.address()); // node D
       // partitioned
 
       // Unblock traffic to member D on other members
@@ -359,10 +359,6 @@ public class FailureDetectorTest extends BaseTest {
     Future<List<FailureDetectorEvent>> listB = listenNextEventFor(fdB, members);
     Future<List<FailureDetectorEvent>> listX = listenNextEventFor(fdX, members);
 
-    // Restarted member attributes are not initialized
-    Transport xx;
-    FailureDetectorImpl fdXx;
-
     try {
       start(fdetectors);
 
@@ -370,23 +366,7 @@ public class FailureDetectorTest extends BaseTest {
       assertStatus(b.address(), ALIVE, awaitEvents(listB), a.address(), x.address());
       assertStatus(x.address(), ALIVE, awaitEvents(listX), a.address(), b.address());
 
-      // stop node X
-      stop(Collections.singletonList(fdX));
-      TimeUnit.SECONDS.sleep(2);
-
-      // restart node X as XX
-      xx =
-          createTransport(
-              TransportConfig //
-                  .builder()
-                  .port(x.address().port())
-                  .build());
-      assertEquals(x.address(), xx.address());
-      fdetectors = Arrays.asList(fdA, fdB, fdXx = createFd(xx, members));
-
-      // actual restart here
-      fdXx.start();
-      TimeUnit.SECONDS.sleep(2);
+      FailureDetectorImpl fdXx = restartMember(fdX, members, 2);
 
       listA = listenNextEventFor(fdA, members);
       listB = listenNextEventFor(fdB, members);
@@ -395,40 +375,107 @@ public class FailureDetectorTest extends BaseTest {
       // TODO [AK]: It would be more correct to consider restarted member as a new member, so x is
       // still suspected!
 
-      assertStatus(a.address(), ALIVE, awaitEvents(listA), b.address(), xx.address());
-      assertStatus(b.address(), ALIVE, awaitEvents(listB), a.address(), xx.address());
-      assertStatus(xx.address(), ALIVE, awaitEvents(listXx), a.address(), b.address());
+      assertStatus(a.address(), ALIVE, awaitEvents(listA), b.address(),
+        fdXx.getTransport().address());
+      assertStatus(b.address(), ALIVE, awaitEvents(listB), a.address(),
+        fdXx.getTransport().address());
+      assertStatus(fdXx.getTransport().address(), ALIVE, awaitEvents(listXx), a.address(),
+        b.address());
     } finally {
       stop(fdetectors);
     }
   }
 
+  @Test
+  void testPingRestartedNode_returnsImmediately() throws InterruptedException {
+    // Create transports
+    NetworkEmulatorTransport a = createTransport();
+    NetworkEmulatorTransport x = createTransport();
+    List<Address> members = Arrays.asList(a.address(), x.address());
+
+    // Create failure detectors
+    FailureDetectorConfig fdConfig =
+      ClusterConfig.builder()
+        .pingTimeout(1000) // long ping timeout
+        .pingInterval(2000)
+        .pingReqMembers(1)
+        .metadataTimeout(100)
+        .build();
+    FailureDetectorImpl fdA = createFd(a, members, fdConfig);
+    FailureDetectorImpl fdX = createFd(x, members, fdConfig);
+    List<FailureDetectorImpl> fDetectors = Arrays.asList(fdA, fdX);
+
+    Future<List<FailureDetectorEvent>> listA = listenNextEventFor(fdA, members);
+    Future<List<FailureDetectorEvent>> listX = listenNextEventFor(fdX, members);
+
+    try {
+      start(fDetectors);
+      assertStatus(a.address(), ALIVE, awaitEvents(listA), x.address());
+      assertStatus(x.address(), ALIVE, awaitEvents(listX), a.address());
+
+      System.out.println("All members alive");
+      // Restart node
+      FailureDetectorImpl fdXx = restartMember(fdX, members, 0);
+
+      System.out.println("Member restarted");
+      Collection<FailureDetectorEvent> eventsA = awaitEvents(listenNextEventFor(fdA, members));
+      Collection<FailureDetectorEvent> eventsXx = awaitEvents(listenNextEventFor(fdXx, members));
+
+      assertStatus(a.address(), ALIVE, eventsA, fdXx.getTransport().address());
+      assertStatus(fdXx.getTransport().address(), ALIVE, eventsXx, a.address());
+    } finally {
+      stop(fDetectors);
+    }
+  }
+
+  private FailureDetectorImpl restartMember(FailureDetectorImpl member, List<Address> members,
+    long sleeps)
+    throws InterruptedException {
+    // stop node
+    stop(Collections.singletonList(member));
+    TimeUnit.SECONDS.sleep(sleeps);
+    // restart node as a new at the same address
+    NetworkEmulatorTransport newTransport = createTransport(
+      TransportConfig //
+        .builder()
+        .port(member.getTransport().address().port())
+        .build());
+    assertEquals(member.getTransport().address(), newTransport.address());
+
+    FailureDetectorImpl newFd = createFd(newTransport, members);
+
+    // actual restart here
+    newFd.start();
+    TimeUnit.SECONDS.sleep(sleeps);
+    return newFd;
+  }
+
   private FailureDetectorImpl createFd(Transport transport, List<Address> members) {
     FailureDetectorConfig failureDetectorConfig =
-        ClusterConfig.builder() // faster config for local testing
-            .pingTimeout(100)
-            .pingInterval(200)
-            .pingReqMembers(2)
-            .metadataTimeout(100)
-            .build();
+      ClusterConfig.builder() // faster config for local testing
+        .pingTimeout(100)
+        .pingInterval(200)
+        .pingReqMembers(2)
+        .metadataTimeout(100)
+        .build();
     return createFd(transport, members, failureDetectorConfig);
   }
 
   private FailureDetectorImpl createFd(
-      Transport transport, List<Address> addresses, FailureDetectorConfig config) {
+    Transport transport, List<Address> addresses, FailureDetectorConfig config) {
 
     Member localMember = new Member("member-" + transport.address().port(), transport.address());
 
     Flux<MembershipEvent> membershipFlux =
-        Flux.fromIterable(addresses)
-            .filter(address -> !transport.address().equals(address))
-            .map(address -> new Member("member-" + address.port(), address))
-            .map(member -> MembershipEvent.createAdded(member, Collections.emptyMap()));
+      Flux.fromIterable(addresses)
+        .filter(address -> !transport.address().equals(address))
+        .map(address -> new Member("member-" + address.port(), address))
+        .map(member -> MembershipEvent.createAdded(member, Collections.emptyMap()));
 
     CorrelationIdGenerator cidGenerator = new CorrelationIdGenerator(localMember.id());
 
     return new FailureDetectorImpl(
-        localMember, transport, membershipFlux, config, scheduler, cidGenerator);
+      localMember, transport, membershipFlux, config, scheduler, cidGenerator);
   }
 
   private void start(List<FailureDetectorImpl> fdetectors) {
@@ -447,32 +494,32 @@ public class FailureDetectorTest extends BaseTest {
   }
 
   private void assertStatus(
-      Address address,
-      MemberStatus status,
-      Collection<FailureDetectorEvent> events,
-      Address... expected) {
+    Address address,
+    MemberStatus status,
+    Collection<FailureDetectorEvent> events,
+    Address... expected) {
     List<Address> actual =
-        events.stream()
-            .filter(event -> event.status() == status)
-            .map(FailureDetectorEvent::member)
-            .map(Member::address)
-            .collect(Collectors.toList());
+      events.stream()
+        .filter(event -> event.status() == status)
+        .map(FailureDetectorEvent::member)
+        .map(Member::address)
+        .collect(Collectors.toList());
 
     String msg1 =
-        String.format(
-            "Node %s expected %s %s members %s, but was: %s",
-            address, expected.length, status, Arrays.toString(expected), events);
+      String.format(
+        "Node %s expected %s %s members %s, but was: %s",
+        address, expected.length, status, Arrays.toString(expected), events);
     assertEquals(expected.length, actual.size(), msg1);
 
     for (Address member : expected) {
       String msg2 =
-          String.format("Node %s expected as %s %s, but was: %s", address, status, member, events);
+        String.format("Node %s expected as %s %s, but was: %s", address, status, member, events);
       assertTrue(actual.contains(member), msg2);
     }
   }
 
   private Future<List<FailureDetectorEvent>> listenNextEventFor(
-      FailureDetectorImpl fd, List<Address> addresses) {
+    FailureDetectorImpl fd, List<Address> addresses) {
     addresses = new ArrayList<>(addresses);
     addresses.remove(fd.getTransport().address()); // exclude self
     if (addresses.isEmpty()) {
@@ -499,8 +546,8 @@ public class FailureDetectorTest extends BaseTest {
 
   private <T> CompletableFuture<List<T>> allOf(List<CompletableFuture<T>> futuresList) {
     CompletableFuture<Void> allFuturesResult =
-        CompletableFuture.allOf(futuresList.toArray(new CompletableFuture[0]));
+      CompletableFuture.allOf(futuresList.toArray(new CompletableFuture[0]));
     return allFuturesResult.thenApply(
-        v -> futuresList.stream().map(CompletableFuture::join).collect(Collectors.toList()));
+      v -> futuresList.stream().map(CompletableFuture::join).collect(Collectors.toList()));
   }
 }
