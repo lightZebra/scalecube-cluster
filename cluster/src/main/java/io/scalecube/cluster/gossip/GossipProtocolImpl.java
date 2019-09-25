@@ -240,6 +240,7 @@ public final class GossipProtocolImpl implements GossipProtocol {
     // Send gossip request
     Address address = member.address();
 
+    // TODO: send in one GossipRequest? or this is done to not lose everything because of UDP(UDP in future release)
     gossips.stream()
         .map(this::buildGossipRequestMessage)
         .forEach(

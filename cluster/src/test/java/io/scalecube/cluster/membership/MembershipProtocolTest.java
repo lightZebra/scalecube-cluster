@@ -11,6 +11,7 @@ import io.scalecube.cluster.fdetector.FailureDetectorImpl;
 import io.scalecube.cluster.gossip.GossipProtocolImpl;
 import io.scalecube.cluster.metadata.MetadataStoreImpl;
 import io.scalecube.cluster.monitor.ClusterMonitorModel;
+import io.scalecube.cluster.transport.api.Message;
 import io.scalecube.cluster.transport.api.Transport;
 import io.scalecube.cluster.transport.api.TransportConfig;
 import io.scalecube.cluster.utils.NetworkEmulator;
@@ -65,6 +66,120 @@ public class MembershipProtocolTest extends BaseTest {
       }
     }
   }
+
+  @Test
+  public void testLeaveCluster() {
+    NetworkEmulatorTransport a = createTransport();
+    NetworkEmulatorTransport b = createTransport();
+    NetworkEmulatorTransport c = createTransport();
+    List<Address> addresses = Arrays.asList(a.address(), b.address(), c.address());
+
+    MembershipProtocolImpl cmA = createMembership(a, addresses);
+    MembershipProtocolImpl cmB = createMembership(b, addresses);
+    MembershipProtocolImpl cmC = createMembership(c, addresses);
+
+    List<MembershipEvent> cmAEvents = new ArrayList<>();
+    List<MembershipEvent> cmCEvents = new ArrayList<>();
+
+    cmA.listen().subscribe(cmAEvents::add);
+    cmC.listen().subscribe(cmCEvents::add);
+
+    awaitSeconds(2);
+
+    try {
+      cmB.leaveCluster().block(TIMEOUT);
+    } finally {
+      stopAll(cmB);
+    }
+
+    awaitSuspicion(3);
+
+    assertTrue(cmAEvents.get(cmAEvents.size() - 2).isLeaving());
+    assertTrue(cmAEvents.get(cmAEvents.size() - 1).isRemoved());
+
+    assertTrue(cmCEvents.get(cmCEvents.size() - 2).isLeaving());
+    assertTrue(cmCEvents.get(cmCEvents.size() - 1).isRemoved());
+  }
+
+  @Test
+  public void testLeaveClusterCameBeforeAlive() {
+    final NetworkEmulatorTransport a = createTransport();
+    final NetworkEmulatorTransport b = createTransport();
+    final Member anotherMember = new Member("leavingNodeId-1", "", Address.from("localhost:9236"));
+    final List<Address> addresses = Arrays.asList(a.address(), b.address());
+
+    final MembershipProtocolImpl cmA = createMembership(a, addresses);
+    final MembershipProtocolImpl cmB = createMembership(b, addresses);
+
+    awaitSeconds(2);
+
+    final List<MembershipEvent> cmAEvents = new ArrayList<>();
+    cmA.listen().subscribe(cmAEvents::add);
+
+    final MembershipRecord leavingRecord =
+        new MembershipRecord(anotherMember, MemberStatus.LEAVING, 5);
+    final Message leavingMessage =
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(leavingRecord)
+            .build();
+
+    cmB.getGossipProtocol().spread(leavingMessage).block(TIMEOUT);
+    awaitSeconds(3);
+
+    final MembershipRecord addedRecord = new MembershipRecord(anotherMember, MemberStatus.ALIVE, 4);
+    final Message addedMessage =
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(addedRecord)
+            .build();
+
+    cmB.getGossipProtocol().spread(addedMessage).block(TIMEOUT);
+    awaitSuspicion(3);
+
+    assertTrue(cmAEvents.get(cmAEvents.size() - 2).isLeaving());
+    assertTrue(cmAEvents.get(cmAEvents.size() - 1).isRemoved());
+  }
+
+  @Test
+  public void testLeaveClusterOnSuspectedNode() {
+    final NetworkEmulatorTransport a = createTransport();
+    final NetworkEmulatorTransport b = createTransport();
+    final Member anotherMember = new Member("leavingNodeId-1", "", Address.from("localhost:9236"));
+    final List<Address> addresses = Arrays.asList(a.address(), b.address());
+
+    final MembershipProtocolImpl cmA = createMembership(a, addresses);
+    final MembershipProtocolImpl cmB = createMembership(b, addresses);
+
+    awaitSeconds(2);
+
+    final List<MembershipEvent> cmAEvents = new ArrayList<>();
+    cmA.listen().subscribe(cmAEvents::add);
+
+    final MembershipRecord suspectedNode =
+      new MembershipRecord(anotherMember, MemberStatus.SUSPECT, 5);
+    final Message leavingMessage =
+      Message.builder()
+        .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+        .data(suspectedNode)
+        .build();
+
+    cmB.getGossipProtocol().spread(leavingMessage).block(TIMEOUT);
+    awaitSeconds(3);
+
+    final MembershipRecord addedRecord = new MembershipRecord(anotherMember, MemberStatus.ALIVE, 4);
+    final Message addedMessage =
+      Message.builder()
+        .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+        .data(addedRecord)
+        .build();
+
+    cmB.getGossipProtocol().spread(addedMessage).block(TIMEOUT);
+    awaitSeconds(3);
+
+    assertTrue(cmAEvents.isEmpty());
+  }
+
 
   @Test
   public void testInitialPhaseOk() {
