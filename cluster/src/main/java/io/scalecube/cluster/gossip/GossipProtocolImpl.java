@@ -46,11 +46,11 @@ public final class GossipProtocolImpl implements GossipProtocol {
 
   private long currentPeriod = 0;
   private long gossipCounter = 0;
-  private Map<String, SequenceIdCollector> sequenceIdCollector = new HashMap<>();
-  private Map<String, GossipState> gossips = new HashMap<>();
-  private Map<String, MonoSink<String>> futures = new HashMap<>();
+  private final Map<String, SequenceIdCollector> sequenceIdCollectors = new HashMap<>();
+  private final Map<String, GossipState> gossips = new HashMap<>();
+  private final Map<String, MonoSink<String>> futures = new HashMap<>();
 
-  private List<Member> remoteMembers = new ArrayList<>();
+  private final List<Member> remoteMembers = new ArrayList<>();
   private int remoteMembersIndex = -1;
 
   // Disposables
@@ -180,11 +180,11 @@ public final class GossipProtocolImpl implements GossipProtocol {
   // ================================================
 
   private String createAndPutGossip(Message message) {
-    long period = this.currentPeriod;
-    Gossip gossip = createGossip(message);
-    GossipState gossipState = new GossipState(gossip, period);
-    gossips.put(gossip.gossipId(), gossipState);
+    final long period = this.currentPeriod;
+    final Gossip gossip = createGossip(message);
+    final GossipState gossipState = new GossipState(gossip, period);
 
+    gossips.put(gossip.gossipId(), gossipState);
     ensureSequence(localMember.id()).add(gossip.sequenceId());
 
     return gossip.gossipId();
@@ -239,12 +239,7 @@ public final class GossipProtocolImpl implements GossipProtocol {
   }
 
   private SequenceIdCollector ensureSequence(String key) {
-    SequenceIdCollector sequenceIdCollector = this.sequenceIdCollector.get(key);
-    if (sequenceIdCollector == null) {
-      sequenceIdCollector = new SequenceIdCollector();
-      this.sequenceIdCollector.put(key, sequenceIdCollector);
-    }
-    return sequenceIdCollector;
+    return sequenceIdCollectors.computeIfAbsent(key, s -> new SequenceIdCollector());
   }
 
   private void spreadGossipsTo(long period, Member member) {

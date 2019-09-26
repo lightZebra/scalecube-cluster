@@ -38,14 +38,14 @@ final class Gossip {
   }
 
   @Override
-  public boolean equals(Object o) {
-    if (this == o) {
+  public boolean equals(Object that) {
+    if (this == that) {
       return true;
     }
-    if (o == null || getClass() != o.getClass()) {
+    if (that == null || getClass() != that.getClass()) {
       return false;
     }
-    Gossip gossip = (Gossip) o;
+    Gossip gossip = (Gossip) that;
     return sequenceId == gossip.sequenceId
         && Objects.equals(gossiperId, gossip.gossiperId)
         && Objects.equals(message, gossip.message);
