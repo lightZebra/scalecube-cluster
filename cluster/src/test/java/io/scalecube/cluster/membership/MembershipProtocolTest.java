@@ -78,13 +78,13 @@ public class MembershipProtocolTest extends BaseTest {
     MembershipProtocolImpl cmB = createMembership(b, addresses);
     MembershipProtocolImpl cmC = createMembership(c, addresses);
 
-    List<MembershipEvent> cmAEvents = new ArrayList<>();
-    List<MembershipEvent> cmCEvents = new ArrayList<>();
-
-    cmA.listen().subscribe(cmAEvents::add);
-    cmC.listen().subscribe(cmCEvents::add);
-
     awaitSeconds(2);
+
+    List<MembershipEvent> cmAEvents = Collections.synchronizedList(new ArrayList<>());
+    List<MembershipEvent> cmCEvents = Collections.synchronizedList(new ArrayList<>());
+
+    cmA.listen().filter(event -> !event.isAdded()).subscribe(cmAEvents::add);
+    cmC.listen().filter(event -> !event.isAdded()).subscribe(cmCEvents::add);
 
     try {
       cmB.leaveCluster().block(TIMEOUT);
@@ -92,13 +92,18 @@ public class MembershipProtocolTest extends BaseTest {
       stopAll(cmB);
     }
 
+    awaitSeconds(2);
     awaitSuspicion(3);
 
-    assertTrue(getBeforeLast(cmAEvents).isLeaving());
-    assertTrue(getLast(cmAEvents).isRemoved());
+    assertTrue(cmAEvents.get(0).isLeaving());
+    assertEquals(cmB.member(), cmAEvents.get(0).member());
+    assertTrue(cmAEvents.get(1).isRemoved());
+    assertEquals(cmB.member(), cmAEvents.get(1).member());
 
-    assertTrue(getBeforeLast(cmCEvents).isLeaving());
-    assertTrue(getLast(cmCEvents).isRemoved());
+    assertTrue(cmCEvents.get(0).isLeaving());
+    assertEquals(cmB.member(), cmCEvents.get(0).member());
+    assertTrue(cmCEvents.get(1).isRemoved());
+    assertEquals(cmB.member(), cmCEvents.get(1).member());
   }
 
   @Test
@@ -113,7 +118,7 @@ public class MembershipProtocolTest extends BaseTest {
 
     awaitSeconds(2);
 
-    final List<MembershipEvent> cmAEvents = new ArrayList<>();
+    final List<MembershipEvent> cmAEvents = Collections.synchronizedList(new ArrayList<>());
     cmA.listen().subscribe(cmAEvents::add);
 
     final MembershipRecord leavingRecord =
@@ -135,10 +140,15 @@ public class MembershipProtocolTest extends BaseTest {
             .build();
 
     cmB.getGossipProtocol().spread(addedMessage).block(TIMEOUT);
+    awaitSeconds(2);
     awaitSuspicion(3);
 
-    assertTrue(getBeforeLast(cmAEvents).isLeaving());
-    assertTrue(getLast(cmAEvents).isRemoved());
+    assertTrue(cmAEvents.get(0).isAdded());
+    assertEquals(anotherMember, cmAEvents.get(0).member());
+    assertTrue(cmAEvents.get(1).isLeaving());
+    assertEquals(anotherMember, cmAEvents.get(1).member());
+    assertTrue(cmAEvents.get(2).isRemoved());
+    assertEquals(anotherMember, cmAEvents.get(2).member());
   }
 
   @Test
@@ -153,8 +163,8 @@ public class MembershipProtocolTest extends BaseTest {
 
     awaitSeconds(2);
 
-    final List<MembershipEvent> cmAEvents = new ArrayList<>();
-    cmA.listen().subscribe(cmAEvents::add);
+    final List<MembershipEvent> cmAEvents = Collections.synchronizedList(new ArrayList<>());
+    cmA.listen().filter(event -> !event.isAdded()).subscribe(cmAEvents::add);
 
     final MembershipRecord suspectedNode =
         new MembershipRecord(anotherMember, MemberStatus.SUSPECT, 5);
@@ -176,6 +186,7 @@ public class MembershipProtocolTest extends BaseTest {
             .build();
 
     cmB.getGossipProtocol().spread(leavingMessage).block(TIMEOUT);
+    awaitSeconds(2);
     awaitSuspicion(3);
 
     assertTrue(cmAEvents.isEmpty());
@@ -185,52 +196,37 @@ public class MembershipProtocolTest extends BaseTest {
   public void testLeaveClusterOnAliveAndSuspectedNode() {
     final NetworkEmulatorTransport a = createTransport();
     final NetworkEmulatorTransport b = createTransport();
-    final Member anotherMember = new Member("leavingNodeId-1", "", Address.from("localhost:9236"));
     final List<Address> addresses = Arrays.asList(a.address(), b.address());
 
     final MembershipProtocolImpl cmA = createMembership(a, addresses);
     final MembershipProtocolImpl cmB = createMembership(b, addresses);
 
-    awaitSeconds(2);
-
-    final List<MembershipEvent> cmAEvents = new ArrayList<>();
-    cmA.listen().subscribe(cmAEvents::add);
-
-    final MembershipRecord aliveNodeNode =
-        new MembershipRecord(anotherMember, MemberStatus.ALIVE, 3);
-    final Message aliveMessage =
-        Message.builder()
-            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
-            .data(aliveNodeNode)
-            .build();
-
-    cmB.getGossipProtocol().spread(aliveMessage).block(TIMEOUT);
     awaitSeconds(3);
 
-    final MembershipRecord suspectedNode =
-        new MembershipRecord(anotherMember, MemberStatus.SUSPECT, 4);
-    final Message suspectMessage =
-        Message.builder()
-            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
-            .data(suspectedNode)
-            .build();
+    final List<MembershipEvent> cmAEvents = Collections.synchronizedList(new ArrayList<>());
+    cmA.listen().filter(event -> !event.isAdded()).subscribe(cmAEvents::add);
 
-    cmB.getGossipProtocol().spread(suspectMessage).block(TIMEOUT);
+    b.networkEmulator().blockAllInbound();
+    b.networkEmulator().blockAllOutbound();
+
+    awaitSeconds(TEST_SYNC_INTERVAL * 2 / 1000);
+
+    try {
+      b.networkEmulator().unblockAllInbound();
+      b.networkEmulator().unblockAllOutbound();
+
+      cmB.leaveCluster().block(TIMEOUT);
+    } finally {
+      stopAll(cmB);
+    }
+
     awaitSeconds(3);
-
-    final MembershipRecord leavingRecord =
-        new MembershipRecord(anotherMember, MemberStatus.LEAVING, 4);
-    final Message leavingMessage =
-        Message.builder()
-            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
-            .data(leavingRecord)
-            .build();
-
-    cmB.getGossipProtocol().spread(leavingMessage).block(TIMEOUT);
     awaitSuspicion(3);
 
-    assertTrue(getBeforeLast(cmAEvents).isLeaving());
-    assertTrue(getLast(cmAEvents).isRemoved());
+    assertTrue(cmAEvents.get(0).isLeaving());
+    assertEquals(cmB.member(), cmAEvents.get(0).member());
+    assertTrue(cmAEvents.get(1).isRemoved());
+    assertEquals(cmB.member(), cmAEvents.get(1).member());
   }
 
   @Test
@@ -1251,13 +1247,5 @@ public class MembershipProtocolTest extends BaseTest {
     ReplayProcessor<MembershipEvent> recording = ReplayProcessor.create();
     membership.listen().filter(MembershipEvent::isRemoved).subscribe(recording);
     return recording;
-  }
-
-  private static <T> T getLast(List<T> list) {
-    return list.get(list.size() - 1);
-  }
-
-  private static <T> T getBeforeLast(List<T> list) {
-    return list.get(list.size() - 2);
   }
 }

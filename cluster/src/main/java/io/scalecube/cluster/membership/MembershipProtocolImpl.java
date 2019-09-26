@@ -576,12 +576,13 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
 
     // Emit events if needed and ignore alive
     if (!aliveEmittedSet.contains(memberId)) {
-      final ByteBuffer metadata = metadataOrThrow(member);
       final long timestamp = System.currentTimeMillis();
 
-      publishEvent(MembershipEvent.createAdded(member, metadata.slice(), timestamp));
+      // There is no metadata in this case
+      // We could'n fetch metadata because node already wanted to leave
+      publishEvent(MembershipEvent.createAdded(member, null, timestamp));
       aliveEmittedSet.add(memberId);
-      publishEvent(MembershipEvent.createLeaving(member, metadata, timestamp));
+      publishEvent(MembershipEvent.createLeaving(member, null, timestamp));
     }
 
     return Mono.empty();
@@ -634,7 +635,11 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
             publishEvent(event);
           }
 
-          return spreadMembershipGossip(r1);
+          if (r0 == null || !r0.isLeaving()) {
+            return spreadMembershipGossip(r1);
+          } else {
+            return Mono.empty();
+          }
         });
   }
 
@@ -703,9 +708,6 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
 
       if (event.isAdded()) {
         aliveEmittedSet.add(member.id());
-      }
-      if (r0 != null && r0.isLeaving()) {
-        publishEvent(MembershipEvent.createLeaving(member, event.newMetadata().slice(), timestamp));
       }
     }
   }
