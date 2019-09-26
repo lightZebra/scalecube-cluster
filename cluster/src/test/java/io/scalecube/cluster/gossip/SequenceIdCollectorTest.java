@@ -31,8 +31,8 @@ class SequenceIdCollectorTest {
   @Test
   public void testIsHeldNotExistedElements() {
     assertTrue(sequenceIdCollector.add(10));
-    assertFalse(sequenceIdCollector.contains(5));
-    assertFalse(sequenceIdCollector.contains(20));
+    assertFalse(sequenceIdCollector.contains(9));
+    assertFalse(sequenceIdCollector.contains(11));
   }
 
   @Test
@@ -42,10 +42,30 @@ class SequenceIdCollectorTest {
   }
 
   @Test
+  public void testLowestAndHighestElementInRange() {
+    for (int i = 0; i < 10; i++) {
+      assertTrue(sequenceIdCollector.add(i));
+    }
+
+    assertTrue(sequenceIdCollector.contains(0));
+    assertTrue(sequenceIdCollector.contains(9));
+    assertFalse(sequenceIdCollector.add(0));
+    assertFalse(sequenceIdCollector.add(9));
+  }
+
+  @Test
   public void testJoinLowerRange() {
     assertTrue(sequenceIdCollector.add(10));
     assertTrue(sequenceIdCollector.add(11));
     assertEquals(1, sequenceIdCollector.size());
+
+    for (int i = 20; i < 30; i++) {
+      assertTrue(sequenceIdCollector.add(i));
+    }
+    assertEquals(2, sequenceIdCollector.size());
+
+    assertTrue(sequenceIdCollector.add(19));
+    assertEquals(2, sequenceIdCollector.size());
   }
 
   @Test
@@ -53,6 +73,14 @@ class SequenceIdCollectorTest {
     assertTrue(sequenceIdCollector.add(10));
     assertTrue(sequenceIdCollector.add(9));
     assertEquals(1, sequenceIdCollector.size());
+
+    for (int i = 20; i < 30; i++) {
+      assertTrue(sequenceIdCollector.add(i));
+    }
+    assertEquals(2, sequenceIdCollector.size());
+
+    assertTrue(sequenceIdCollector.add(30));
+    assertEquals(2, sequenceIdCollector.size());
   }
 
   @Test
@@ -63,5 +91,16 @@ class SequenceIdCollectorTest {
 
     assertTrue(sequenceIdCollector.add(11));
     assertEquals(1, sequenceIdCollector.size());
+
+    for (int i = 20; i < 25; i++) {
+      assertTrue(sequenceIdCollector.add(i));
+    }
+    for (int i = 26; i < 30; i++) {
+      assertTrue(sequenceIdCollector.add(i));
+    }
+    assertEquals(3, sequenceIdCollector.size());
+
+    sequenceIdCollector.add(25);
+    assertEquals(2, sequenceIdCollector.size());
   }
 }
