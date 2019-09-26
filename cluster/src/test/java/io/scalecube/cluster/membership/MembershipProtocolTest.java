@@ -94,11 +94,11 @@ public class MembershipProtocolTest extends BaseTest {
 
     awaitSuspicion(3);
 
-    assertTrue(cmAEvents.get(cmAEvents.size() - 2).isLeaving());
-    assertTrue(cmAEvents.get(cmAEvents.size() - 1).isRemoved());
+    assertTrue(getBeforeLast(cmAEvents).isLeaving());
+    assertTrue(getLast(cmAEvents).isRemoved());
 
-    assertTrue(cmCEvents.get(cmCEvents.size() - 2).isLeaving());
-    assertTrue(cmCEvents.get(cmCEvents.size() - 1).isRemoved());
+    assertTrue(getBeforeLast(cmCEvents).isLeaving());
+    assertTrue(getLast(cmCEvents).isRemoved());
   }
 
   @Test
@@ -137,8 +137,8 @@ public class MembershipProtocolTest extends BaseTest {
     cmB.getGossipProtocol().spread(addedMessage).block(TIMEOUT);
     awaitSuspicion(3);
 
-    assertTrue(cmAEvents.get(cmAEvents.size() - 2).isLeaving());
-    assertTrue(cmAEvents.get(cmAEvents.size() - 1).isRemoved());
+    assertTrue(getBeforeLast(cmAEvents).isLeaving());
+    assertTrue(getLast(cmAEvents).isRemoved());
   }
 
   @Test
@@ -157,29 +157,81 @@ public class MembershipProtocolTest extends BaseTest {
     cmA.listen().subscribe(cmAEvents::add);
 
     final MembershipRecord suspectedNode =
-      new MembershipRecord(anotherMember, MemberStatus.SUSPECT, 5);
+        new MembershipRecord(anotherMember, MemberStatus.SUSPECT, 5);
+    final Message suspectMessage =
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(suspectedNode)
+            .build();
+
+    cmB.getGossipProtocol().spread(suspectMessage).block(TIMEOUT);
+    awaitSeconds(3);
+
+    final MembershipRecord leavingRecord =
+        new MembershipRecord(anotherMember, MemberStatus.LEAVING, 4);
     final Message leavingMessage =
-      Message.builder()
-        .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
-        .data(suspectedNode)
-        .build();
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(leavingRecord)
+            .build();
 
     cmB.getGossipProtocol().spread(leavingMessage).block(TIMEOUT);
-    awaitSeconds(3);
-
-    final MembershipRecord addedRecord = new MembershipRecord(anotherMember, MemberStatus.ALIVE, 4);
-    final Message addedMessage =
-      Message.builder()
-        .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
-        .data(addedRecord)
-        .build();
-
-    cmB.getGossipProtocol().spread(addedMessage).block(TIMEOUT);
-    awaitSeconds(3);
+    awaitSuspicion(3);
 
     assertTrue(cmAEvents.isEmpty());
   }
 
+  @Test
+  public void testLeaveClusterOnAliveAndSuspectedNode() {
+    final NetworkEmulatorTransport a = createTransport();
+    final NetworkEmulatorTransport b = createTransport();
+    final Member anotherMember = new Member("leavingNodeId-1", "", Address.from("localhost:9236"));
+    final List<Address> addresses = Arrays.asList(a.address(), b.address());
+
+    final MembershipProtocolImpl cmA = createMembership(a, addresses);
+    final MembershipProtocolImpl cmB = createMembership(b, addresses);
+
+    awaitSeconds(2);
+
+    final List<MembershipEvent> cmAEvents = new ArrayList<>();
+    cmA.listen().subscribe(cmAEvents::add);
+
+    final MembershipRecord aliveNodeNode =
+        new MembershipRecord(anotherMember, MemberStatus.ALIVE, 3);
+    final Message aliveMessage =
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(aliveNodeNode)
+            .build();
+
+    cmB.getGossipProtocol().spread(aliveMessage).block(TIMEOUT);
+    awaitSeconds(3);
+
+    final MembershipRecord suspectedNode =
+        new MembershipRecord(anotherMember, MemberStatus.SUSPECT, 4);
+    final Message suspectMessage =
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(suspectedNode)
+            .build();
+
+    cmB.getGossipProtocol().spread(suspectMessage).block(TIMEOUT);
+    awaitSeconds(3);
+
+    final MembershipRecord leavingRecord =
+        new MembershipRecord(anotherMember, MemberStatus.LEAVING, 4);
+    final Message leavingMessage =
+        Message.builder()
+            .qualifier(MembershipProtocolImpl.MEMBERSHIP_GOSSIP)
+            .data(leavingRecord)
+            .build();
+
+    cmB.getGossipProtocol().spread(leavingMessage).block(TIMEOUT);
+    awaitSuspicion(3);
+
+    assertTrue(getBeforeLast(cmAEvents).isLeaving());
+    assertTrue(getLast(cmAEvents).isRemoved());
+  }
 
   @Test
   public void testInitialPhaseOk() {
@@ -1199,5 +1251,13 @@ public class MembershipProtocolTest extends BaseTest {
     ReplayProcessor<MembershipEvent> recording = ReplayProcessor.create();
     membership.listen().filter(MembershipEvent::isRemoved).subscribe(recording);
     return recording;
+  }
+
+  private static <T> T getLast(List<T> list) {
+    return list.get(list.size() - 1);
+  }
+
+  private static <T> T getBeforeLast(List<T> list) {
+    return list.get(list.size() - 2);
   }
 }

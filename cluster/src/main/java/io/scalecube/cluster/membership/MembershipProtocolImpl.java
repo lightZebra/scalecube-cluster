@@ -518,7 +518,7 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
           }
 
           if (r1.isLeaving()) {
-            return onLeavingDetected(r1);
+            return onLeavingDetected(r0, r1);
           }
 
           if (r1.isDead()) {
@@ -536,19 +536,7 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
 
           if (r1.isAlive()) {
             if (r0 != null && r0.isLeaving()) {
-              // r1 is outdated "ALIVE" event because we already have "LEAVING"
-              // Emit events if needed and ignore alive
-              if (!aliveEmittedSet.contains(r1.member().id())) {
-                final long timestamp = System.currentTimeMillis();
-                final ByteBuffer metadata =
-                    // TODO: ByteBuffer.allocate(0) ???
-                    metadataStore.metadata(r1.member()).orElse(ByteBuffer.allocate(0));
-
-                sink.next(MembershipEvent.createAdded(r1.member(), metadata.slice(), timestamp));
-                aliveEmittedSet.add(r1.member().id());
-                sink.next(MembershipEvent.createLeaving(r1.member(), metadata, timestamp));
-              }
-              return Mono.empty();
+              return onAliveAfterLeaving(r1);
             }
 
             // New alive or updated alive
@@ -581,6 +569,24 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
         });
   }
 
+  private Mono<Void> onAliveAfterLeaving(MembershipRecord r1) {
+    // r1 is outdated "ALIVE" event because we already have "LEAVING"
+    final Member member = r1.member();
+    final String memberId = member.id();
+
+    // Emit events if needed and ignore alive
+    if (!aliveEmittedSet.contains(memberId)) {
+      final ByteBuffer metadata = metadataOrThrow(member);
+      final long timestamp = System.currentTimeMillis();
+
+      publishEvent(MembershipEvent.createAdded(member, metadata.slice(), timestamp));
+      aliveEmittedSet.add(memberId);
+      publishEvent(MembershipEvent.createLeaving(member, metadata, timestamp));
+    }
+
+    return Mono.empty();
+  }
+
   private Mono<Void> onSelfMemberDetected(
       MembershipRecord r0, MembershipRecord r1, MembershipUpdateReason reason) {
     return Mono.fromRunnable(
@@ -603,47 +609,50 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
         });
   }
 
-  private Mono<Void> onLeavingDetected(MembershipRecord r) {
+  private Mono<Void> onLeavingDetected(MembershipRecord r0, MembershipRecord r1) {
     return Mono.defer(
         () -> {
-          final Member member = r.member();
-          final MembershipRecord latestMembershipRecord = membershipTable.get(member.id());
+          final Member member = r1.member();
+          final String memberId = member.id();
 
-          if (latestMembershipRecord == null) {
-            members.put(member.id(), member);
-            membershipTable.put(member.id(), r);
-          } else if (latestMembershipRecord.isSuspect()) {
-            membershipTable.put(member.id(), r);
-            if (aliveEmittedSet.contains(member.id())) {
-              final ByteBuffer metadata =
-                  // TODO: ByteBuffer.allocate(0) ???
-                  metadataStore.metadata(member).orElse(ByteBuffer.allocate(0));
+          membershipTable.put(memberId, r1);
 
-              final MembershipEvent event =
-                  MembershipEvent.createLeaving(member, metadata, System.currentTimeMillis());
-              sink.next(event);
+          MembershipEvent event = null;
+          if (r0 == null) {
+            members.put(memberId, member);
+          } else if (r0.isSuspect()) {
+            if (aliveEmittedSet.contains(memberId)) {
+              final ByteBuffer metadata = metadataOrThrow(member);
+              event = MembershipEvent.createLeaving(member, metadata, System.currentTimeMillis());
             }
-          } else if (latestMembershipRecord.isAlive()) {
-            // case for anything except LEAVING and SUSPECT from previous case
-            membershipTable.put(member.id(), r);
-            final ByteBuffer metadata =
-                // TODO: ByteBuffer.allocate(0) ???
-                metadataStore.metadata(member).orElse(ByteBuffer.allocate(0));
-
-            final MembershipEvent event =
-                MembershipEvent.createLeaving(member, metadata, System.currentTimeMillis());
-            LOGGER_MEMBERSHIP.debug("Emitting membership event {}", event);
-            sink.next(event);
+          } else if (r0.isAlive()) {
+            final ByteBuffer metadata = metadataOrThrow(member);
+            event = MembershipEvent.createLeaving(member, metadata, System.currentTimeMillis());
           }
 
-          return spreadMembershipGossip(r);
+          if (event != null) {
+            publishEvent(event);
+          }
+
+          return spreadMembershipGossip(r1);
         });
   }
 
-  private Mono<Void> onDeadMemberDetected(MembershipRecord r) {
+  private ByteBuffer metadataOrThrow(Member member) {
+    return metadataStore
+        .metadata(member)
+        .orElseThrow(() -> new IllegalStateException("No metadata present for member: " + member));
+  }
+
+  private void publishEvent(MembershipEvent event) {
+    LOGGER_MEMBERSHIP.debug("Emitting membership event {}", event);
+    sink.next(event);
+  }
+
+  private Mono<Void> onDeadMemberDetected(MembershipRecord r1) {
     return Mono.fromRunnable(
         () -> {
-          final Member member = r.member();
+          final Member member = r1.member();
 
           cancelSuspicionTimeoutTask(member.id());
 
@@ -654,54 +663,49 @@ public final class MembershipProtocolImpl implements MembershipProtocol {
           // Update membership
           members.remove(member.id());
           aliveEmittedSet.remove(member.id());
-          final MembershipRecord lastMembershipTable = membershipTable.remove(member.id());
-
-          // Log that member leaved gracefully or without notification
-          if (lastMembershipTable != null) {
-            if (lastMembershipTable.isLeaving()) {
-              LOGGER_MEMBERSHIP.info("Member leaved gracefully: {}", member);
-            } else {
-              LOGGER_MEMBERSHIP.warn("Member leaved without notification: {}", member);
-            }
-          }
 
           // removed
-          ByteBuffer metadata0 = metadataStore.removeMetadata(member);
-          MembershipEvent event =
-              MembershipEvent.createRemoved(member, metadata0, System.currentTimeMillis());
-          LOGGER_MEMBERSHIP.debug("Emitting membership event {}", event);
-          sink.next(event);
+          final MembershipRecord r0 = membershipTable.remove(member.id());
+          final ByteBuffer metadata = metadataStore.removeMetadata(member);
+
+          // Log that member leaved gracefully or without notification
+          if (r0.isLeaving()) {
+            LOGGER_MEMBERSHIP.debug("Member leaved gracefully: {}", member);
+          } else {
+            LOGGER_MEMBERSHIP.warn("Member leaved without notification: {}", member);
+          }
+
+          publishEvent(MembershipEvent.createRemoved(member, metadata, System.currentTimeMillis()));
         });
   }
 
   private void onAliveMemberDetected(
-      MembershipRecord r, ByteBuffer metadata0, ByteBuffer metadata1) {
+      MembershipRecord r1, ByteBuffer metadata0, ByteBuffer metadata1) {
 
-    final Member member = r.member();
+    final Member member = r1.member();
 
     final boolean memberExists = members.containsKey(member.id());
 
-    final MembershipEvent event;
     final long timestamp = System.currentTimeMillis();
+    MembershipEvent event = null;
     if (!memberExists) {
       event = MembershipEvent.createAdded(member, metadata1, timestamp);
     } else if (!metadata1.equals(metadata0)) {
       event = MembershipEvent.createUpdated(member, metadata0, metadata1, timestamp);
-    } else {
-      event = null;
     }
 
     members.put(member.id(), member);
-    final MembershipRecord latestMembershipRecord = membershipTable.put(member.id(), r);
+    final MembershipRecord r0 = membershipTable.put(member.id(), r1);
 
     if (event != null) {
-      LOGGER_MEMBERSHIP.debug("Emitting membership event {}", event);
-      sink.next(event);
+
+      publishEvent(event);
+
       if (event.isAdded()) {
         aliveEmittedSet.add(member.id());
       }
-      if (latestMembershipRecord != null && latestMembershipRecord.isLeaving()) {
-        sink.next(MembershipEvent.createLeaving(member, event.newMetadata().slice(), timestamp));
+      if (r0 != null && r0.isLeaving()) {
+        publishEvent(MembershipEvent.createLeaving(member, event.newMetadata().slice(), timestamp));
       }
     }
   }
